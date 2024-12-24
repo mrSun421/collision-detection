@@ -2,6 +2,7 @@ const std = @import("std");
 const rng = std.Random.DefaultPrng;
 const rl = @import("raylib");
 
+const circleCount = 1000;
 const Circle = struct { id: u64, position: rl.Vector2, velocity: rl.Vector2, radius: f32, color: rl.Color, mass: f32 };
 
 pub fn main() !void {
@@ -11,10 +12,11 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
     var circleArray = std.MultiArrayList(Circle){};
+    try circleArray.setCapacity(gpa.allocator(), circleCount);
     defer circleArray.deinit(gpa.allocator());
     var rnd = rng.init(0);
 
-    while (circleArray.len < 1000) {
+    while (circleArray.len < circleCount) {
         const radius = 2.0 + rnd.random().float(f32) * 4.0;
         const xpos = radius + rnd.random().float(f32) * (screenWidth - radius);
         const ypos = radius + rnd.random().float(f32) * (screenHeight - radius);
@@ -52,16 +54,10 @@ pub fn main() !void {
                 }
                 pos.* = newPos;
             }
+            var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+            defer arena.deinit();
 
-            var spacePartition = std.AutoHashMap(struct { i64, i64 }, std.ArrayList(u64)).init(gpa.allocator());
-            defer {
-                var iter = spacePartition.iterator();
-                while (iter.next()) |entry| {
-                    entry.value_ptr.deinit();
-                }
-
-                spacePartition.deinit();
-            }
+            var spacePartition = std.AutoHashMap(struct { i64, i64 }, std.ArrayList(u64)).init(arena.allocator());
 
             for (0..circleArray.len) |i| {
                 const circ = circleArray.get(i);
@@ -73,7 +69,7 @@ pub fn main() !void {
                     if (setOfCircles.found_existing) {
                         try setOfCircles.value_ptr.append(i);
                     } else {
-                        setOfCircles.value_ptr.* = std.ArrayList(u64).init(gpa.allocator());
+                        setOfCircles.value_ptr.* = std.ArrayList(u64).init(arena.allocator());
                         try setOfCircles.value_ptr.append(i);
                     }
                 }
