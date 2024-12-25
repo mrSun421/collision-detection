@@ -1,8 +1,9 @@
 const std = @import("std");
 const rng = std.Random.DefaultPrng;
+const Thread = std.Thread;
 const rl = @import("raylib");
 
-const circleCount = 1000;
+const circleCount = 2000;
 const Circle = struct { id: u64, position: rl.Vector2, velocity: rl.Vector2, radius: f32, color: rl.Color, mass: f32 };
 
 pub fn main() !void {
@@ -92,40 +93,50 @@ fn spacePartitionMethod(allocator: std.mem.Allocator, circleArray: *std.MultiArr
         }
     }
 
+    var circleUpdateThreadPool: Thread.Pool = undefined;
+    try circleUpdateThreadPool.init(Thread.Pool.Options{ .n_jobs = 16, .allocator = arena.allocator() });
+    defer circleUpdateThreadPool.deinit();
     var spacePartitionIter = spacePartition.iterator();
     while (spacePartitionIter.next()) |entry| {
         const setOfCircles = entry.value_ptr;
-        for (setOfCircles.items) |i| {
-            for (setOfCircles.items) |j| {
-                var circle1 = circleArray.get(i);
-                var circle2 = circleArray.get(j);
-                if (circle1.id == circle2.id) {
-                    continue;
-                } else {
-                    const dist = circle1.position.distance(circle2.position);
-                    if (dist <= circle1.radius + circle2.radius) {
-                        const pos1 = circle1.position;
-                        const pos2 = circle2.position;
-                        const vel1 = circle1.velocity;
-                        const vel2 = circle2.velocity;
-                        const mass1 = circle1.mass;
-                        const mass2 = circle2.mass;
-                        const x1subx2: rl.Vector2 = pos1.subtract(pos2);
-                        const v1subv2: rl.Vector2 = vel1.subtract(vel2);
-                        const x2subx1: rl.Vector2 = pos2.subtract(pos1);
-                        const v2subv1: rl.Vector2 = vel2.subtract(vel1);
-                        const newVel1 = vel1.subtract(x1subx2.scale((2.0 * mass2 / (mass1 + mass2)) * (v1subv2.dotProduct(x1subx2) / x1subx2.lengthSqr())));
-                        const newVel2 = vel2.subtract(x2subx1.scale((2.0 * mass1 / (mass1 + mass2)) * (v2subv1.dotProduct(x2subx1) / x2subx1.lengthSqr())));
-                        circle1.velocity = newVel1;
-                        circle2.velocity = newVel2;
-                        const posOffset = dist - (circle1.radius + circle2.radius);
-                        const newPos1 = pos1.add(x2subx1.normalize().scale(posOffset / 2.0));
-                        const newPos2 = pos2.add(x1subx2.normalize().scale(posOffset / 2.0));
-                        circle1.position = newPos1;
-                        circle2.position = newPos2;
-                        circleArray.set(i, circle1);
-                        circleArray.set(j, circle2);
-                    }
+        try circleUpdateThreadPool.spawn(updateCircles, .{ setOfCircles, circleArray });
+    }
+    var circleUpdateWaitGroup: Thread.WaitGroup = undefined;
+    circleUpdateWaitGroup.reset();
+    circleUpdateThreadPool.waitAndWork(&circleUpdateWaitGroup);
+}
+
+fn updateCircles(circleIndexes: *std.ArrayList(u64), circleArray: *std.MultiArrayList(Circle)) void {
+    for (circleIndexes.items) |i| {
+        for (circleIndexes.items) |j| {
+            var circle1 = circleArray.get(i);
+            var circle2 = circleArray.get(j);
+            if (circle1.id == circle2.id) {
+                continue;
+            } else {
+                const dist = circle1.position.distance(circle2.position);
+                if (dist <= circle1.radius + circle2.radius) {
+                    const pos1 = circle1.position;
+                    const pos2 = circle2.position;
+                    const vel1 = circle1.velocity;
+                    const vel2 = circle2.velocity;
+                    const mass1 = circle1.mass;
+                    const mass2 = circle2.mass;
+                    const x1subx2: rl.Vector2 = pos1.subtract(pos2);
+                    const v1subv2: rl.Vector2 = vel1.subtract(vel2);
+                    const x2subx1: rl.Vector2 = pos2.subtract(pos1);
+                    const v2subv1: rl.Vector2 = vel2.subtract(vel1);
+                    const newVel1 = vel1.subtract(x1subx2.scale((2.0 * mass2 / (mass1 + mass2)) * (v1subv2.dotProduct(x1subx2) / x1subx2.lengthSqr())));
+                    const newVel2 = vel2.subtract(x2subx1.scale((2.0 * mass1 / (mass1 + mass2)) * (v2subv1.dotProduct(x2subx1) / x2subx1.lengthSqr())));
+                    circle1.velocity = newVel1;
+                    circle2.velocity = newVel2;
+                    const posOffset = dist - (circle1.radius + circle2.radius);
+                    const newPos1 = pos1.add(x2subx1.normalize().scale(posOffset / 2.0));
+                    const newPos2 = pos2.add(x1subx2.normalize().scale(posOffset / 2.0));
+                    circle1.position = newPos1;
+                    circle2.position = newPos2;
+                    circleArray.set(i, circle1);
+                    circleArray.set(j, circle2);
                 }
             }
         }
